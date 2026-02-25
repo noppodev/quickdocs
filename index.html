@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>QuickDocs - Professional Document Suite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+
+        :root {
+            --noppo-blue: #0066ff;
+            --noppo-bg: #f8faff;
+            --glass-bg: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.4);
+        }
+
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            background-color: var(--noppo-bg);
+            color: #1f2937;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .liquid-glass {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px) saturate(180%);
+            -webkit-backdrop-filter: blur(16px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.05);
+        }
+
+        /* A4 Container for Preview */
+        .preview-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            align-items: center;
+            padding-bottom: 50px;
+        }
+
+        .a4-page {
+            width: 210mm;
+            min-height: 297mm;
+            padding: 25mm;
+            background: white;
+            box-shadow: 0 0 20px rgba(0,0,0,0.05);
+            box-sizing: border-box;
+            color: #111;
+            line-height: 1.8;
+            font-size: 10.5pt;
+            position: relative;
+            overflow: hidden;
+            word-wrap: break-word;
+        }
+
+        @media (max-width: 768px) {
+            .a4-page {
+                width: 98vw;
+                min-height: auto;
+                padding: 15mm;
+                font-size: 9pt;
+            }
+        }
+
+        .input-noppo {
+            background: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(0, 102, 255, 0.1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .input-noppo:focus {
+            background: #fff;
+            border-color: var(--noppo-blue);
+            box-shadow: 0 0 0 4px rgba(0, 102, 255, 0.1);
+            outline: none;
+        }
+
+        .tab-active {
+            color: var(--noppo-blue);
+            position: relative;
+        }
+        .tab-active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 20%;
+            right: 20%;
+            height: 3px;
+            background: var(--noppo-blue);
+            border-radius: 10px;
+        }
+
+        .btn-noppo {
+            background: var(--noppo-blue);
+            color: white;
+            transition: all 0.2s;
+        }
+        .btn-noppo:hover {
+            filter: brightness(1.1);
+            transform: translateY(-1px);
+        }
+
+        .loading-spin {
+            border: 3px solid rgba(0, 102, 255, 0.1);
+            border-top: 3px solid var(--noppo-blue);
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Hidden element for calculation */
+        #ghost-render {
+            position: absolute;
+            top: -9999px;
+            width: 160mm; /* A4 width minus padding */
+            line-height: 1.8;
+            font-size: 10.5pt;
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden">
+
+    <!-- Guest Guard -->
+    <div id="guest-guard" class="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center p-6 text-center">
+        <div class="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mb-6">
+            <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+        </div>
+        <h2 class="text-2xl font-bold text-gray-900 mb-2">サインインが必要です</h2>
+        <p class="text-gray-500 mb-8 max-w-sm">このツールを利用するには認証が必要です。</p>
+        <button onclick="login()" class="btn-noppo px-10 py-4 rounded-2xl font-bold">NoppoAuthでサインイン</button>
+    </div>
+
+    <!-- Header -->
+    <header class="liquid-glass h-16 flex items-center justify-between px-6 shrink-0 z-50 hidden" id="main-header">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-[#0066ff] rounded-xl flex items-center justify-center text-white font-bold">Q</div>
+            <h1 class="text-lg font-bold tracking-tight text-gray-900">QuickDocs</h1>
+        </div>
+        <div id="user-info" class="flex items-center gap-3 bg-white/50 p-1 pr-4 rounded-full border border-blue-100">
+            <img id="user-avatar" class="w-8 h-8 rounded-full border-2 border-white">
+            <span id="user-name" class="text-sm font-medium text-gray-700"></span>
+            <button onclick="logout()" class="text-xs text-gray-400 hover:text-red-500 ml-2">ログアウト</button>
+        </div>
+    </header>
+
+    <div id="app-container" class="flex flex-col flex-1 overflow-hidden hidden">
+        <nav class="bg-white border-b border-gray-100 flex shrink-0">
+            <button id="tab-edit" onclick="switchView('edit')" class="flex-1 py-4 text-sm font-bold text-gray-400 transition-all">作成</button>
+            <button id="tab-preview" onclick="switchView('preview')" class="flex-1 py-4 text-sm font-bold text-gray-400 transition-all">プレビュー</button>
+        </nav>
+
+        <main class="flex-1 overflow-hidden relative">
+            <!-- Edit View -->
+            <div id="view-edit" class="absolute inset-0 flex flex-col md:flex-row overflow-hidden">
+                <div class="w-full md:w-72 bg-gray-50/50 border-r border-gray-100 overflow-y-auto p-5 shrink-0">
+                    <p class="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-4">Templates</p>
+                    <div class="space-y-2" id="template-list"></div>
+                </div>
+                <div class="flex-1 overflow-y-auto p-6 md:p-16 bg-white">
+                    <div id="question-box" class="max-w-2xl mx-auto">
+                        <div id="question-content" class="space-y-8"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Preview View -->
+            <div id="view-preview" class="absolute inset-0 hidden bg-[#f0f4f8] overflow-y-auto">
+                <div class="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+                    <p class="text-sm font-bold text-gray-400">PDF Output Preview</p>
+                    <button onclick="generatePDF()" class="btn-noppo px-8 py-3 rounded-xl text-sm font-bold shadow-xl shadow-blue-500/20">
+                        PDF保存
+                    </button>
+                </div>
+                <div id="capture-area" class="preview-container p-10">
+                    <!-- Pages will be injected here -->
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Hidden calculation helper -->
+    <div id="ghost-render"></div>
+
+    <!-- Loader -->
+    <div id="loader" class="fixed inset-0 bg-white/90 backdrop-blur-md flex flex-col items-center justify-center z-[110] hidden">
+        <div class="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p id="loader-text" class="text-sm font-bold text-blue-600 tracking-widest uppercase">Analyzing Context</p>
+    </div>
+
+    <script>
+        const AUTH_URL = "https://noppo-auth.noppo5319.workers.dev";
+        const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YXZhc3JkeGd1cWtpaWdjeGtsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MTk5ODcsImV4cCI6MjA4Mjk5NTk4N30.CVq3lyRbxek7Ejs4tP5sN9-0JNEXSLtCsC2Pj-skFFQ";
+        const AI_API = "https://nexus-api.noppo5319.workers.dev";
+
+        let currentUser = null;
+
+        function login() { window.location.href = `${AUTH_URL}?redirect=${encodeURIComponent(window.location.href)}`; }
+        function logout() { window.location.href = `${AUTH_URL}/logout?redirect=${encodeURIComponent(window.location.origin)}`; }
+
+        async function checkAuth() {
+            const ticket = new URLSearchParams(window.location.search).get('ticket');
+            if (ticket) {
+                const res = await fetch(`${AUTH_URL}/auth/v1/user?ticket=${ticket}`, { headers: { 'apikey': SUPABASE_KEY } });
+                if (res.ok) {
+                    const user = await res.json();
+                    window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+                    return user;
+                }
+            }
+            return null;
+        }
+
+        async function getAISuggestion(prompt) {
+            try {
+                const res = await fetch(AI_API, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: prompt, generate_image: false })
+                });
+                const result = await res.json();
+                return result.type === 'text' ? result.response : "生成失敗";
+            } catch (e) { return "エラー"; }
+        }
+
+        const appState = {
+            currentTemplate: 'proposal',
+            currentStep: 0,
+            responses: {},
+            templates: {
+                proposal: {
+                    name: '事業計画書',
+                    style: 'corp',
+                    aiHint: 'このビジネスの概要、目的、市場性、実行プランを含む包括的な事業計画書を作成します。',
+                    questions: [
+                        { id: 'title', label: 'プロジェクト名', hint: '正式名称' },
+                        { id: 'q1', label: 'エグゼクティブサマリー', hint: '全体を要約した文章', ai: true },
+                        { id: 'q2', label: '市場分析とターゲット', hint: '顧客層や競合について', ai: true },
+                        { id: 'q3', label: '実施スケジュール', hint: '主要なマイルストーン', ai: true }
+                    ]
+                },
+                report: {
+                    name: '調査レポート',
+                    style: 'corp',
+                    aiHint: '特定のテーマに関する詳細な調査結果、分析、結論をまとめたアカデミックかつビジネスライクなレポートを作成します。',
+                    questions: [
+                        { id: 'title', label: '調査テーマ', hint: '何についての調査か' },
+                        { id: 'q1', label: '調査方法と対象', hint: 'どのように調べたか', ai: true },
+                        { id: 'q2', label: '主要な発見事項', hint: '得られたデータや事実', ai: true },
+                        { id: 'q3', label: '考察と提言', hint: '今後のアクション案', ai: true }
+                    ]
+                },
+                release: {
+                    name: 'プレスリリース',
+                    style: 'corp',
+                    aiHint: 'メディア向けに新製品や新サービスを告知する、注目を集める構成のリリースを作成します。',
+                    questions: [
+                        { id: 'title', label: 'メインキャッチコピー', hint: '最も伝えたい一言' },
+                        { id: 'q1', label: 'リリースの概要', hint: '5W1Hを意識して', ai: true },
+                        { id: 'q2', label: '背景と開発秘話', hint: 'なぜこれを作ったか', ai: true },
+                        { id: 'q3', label: 'お問い合わせ先', hint: '広報担当連絡先' }
+                    ]
+                },
+                internal: {
+                    name: '社内規定・ガイドライン',
+                    style: 'corp',
+                    aiHint: '組織内のルール、操作マニュアル、またはガイドラインを公的な口調で作成します。',
+                    questions: [
+                        { id: 'title', label: '規定名', hint: '例：テレワーク運用規定' },
+                        { id: 'q1', label: '目的と適用範囲', hint: '誰が対象か', ai: true },
+                        { id: 'q2', label: '具体的なルール', hint: '禁止事項や遵守事項', ai: true },
+                        { id: 'q3', label: '運用開始日', hint: '〇月〇日より施行' }
+                    ]
+                }
+            }
+        };
+
+        function switchView(view) {
+            document.getElementById('view-edit').classList.toggle('hidden', view !== 'edit');
+            document.getElementById('view-preview').classList.toggle('hidden', view !== 'preview');
+            document.getElementById('tab-edit').classList.toggle('tab-active', view === 'edit');
+            document.getElementById('tab-preview').classList.toggle('tab-active', view === 'preview');
+            if (view === 'preview') renderDocument();
+        }
+
+        function initTemplates() {
+            const list = document.getElementById('template-list');
+            list.innerHTML = Object.entries(appState.templates).map(([id, t]) => `
+                <button onclick="selectTemplate('${id}')" id="btn-${id}" class="w-full p-4 text-left rounded-xl text-sm font-bold transition-all ${id === appState.currentTemplate ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-500 hover:bg-white hover:text-blue-600'}">
+                    ${t.name}
+                </button>
+            `).join('');
+            renderQuestion();
+        }
+
+        function selectTemplate(id) {
+            appState.currentTemplate = id;
+            appState.currentStep = 0;
+            appState.responses = {};
+            initTemplates();
+        }
+
+        async function aiAssist(fieldId) {
+            const btn = event.currentTarget;
+            const originalText = btn.innerHTML;
+            const loader = document.getElementById('loader');
+            
+            btn.disabled = true;
+            btn.innerHTML = `<div class="loading-spin"></div>`;
+            loader.classList.remove('hidden');
+
+            const t = appState.templates[appState.currentTemplate];
+            const q = t.questions.find(x => x.id === fieldId);
+            
+            // 総合的な判断のためのコンテキスト構築
+            const context = `
+                現在作成中のドキュメント: ${t.name}
+                テンプレートの目的: ${t.aiHint}
+                現在のタイトル: ${appState.responses['title'] || '未設定'}
+                既に入力された内容: ${JSON.stringify(appState.responses)}
+                今回生成する項目: ${q.label} (ヒント: ${q.hint})
+                
+                指示: 文脈を読み取り、プロフェッショナルで具体的な文章を生成してください。
+            `;
+
+            const res = await getAISuggestion(context);
+            document.getElementById('q-input').value = res;
+            appState.responses[fieldId] = res;
+            
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            loader.classList.add('hidden');
+        }
+
+        function renderQuestion() {
+            const t = appState.templates[appState.currentTemplate];
+            const q = t.questions[appState.currentStep];
+            const content = document.getElementById('question-content');
+            content.innerHTML = `
+                <div class="space-y-6 animate-in slide-in-from-right-4 duration-500">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold text-blue-500 tracking-widest uppercase">STEP ${appState.currentStep + 1} / ${t.questions.length}</span>
+                        ${q.ai ? `<button onclick="aiAssist('${q.id}')" class="flex items-center gap-2 text-xs font-bold text-blue-500 bg-blue-50 px-3 py-1.5 rounded-full hover:bg-blue-100 transition-all">AIスマート生成</button>` : ''}
+                    </div>
+                    <h2 class="text-3xl font-bold text-gray-900 tracking-tight">${q.label}</h2>
+                    <textarea id="q-input" oninput="appState.responses['${q.id}'] = this.value" class="w-full input-noppo rounded-2xl p-6 min-h-[220px] text-lg leading-relaxed" placeholder="${q.hint}">${appState.responses[q.id] || ''}</textarea>
+                    <div class="flex gap-4 pt-6">
+                        ${appState.currentStep > 0 ? `<button onclick="moveStep(-1)" class="px-8 py-4 font-bold text-gray-400">戻る</button>` : ''}
+                        <button onclick="moveStep(1)" class="flex-1 btn-noppo py-4 rounded-2xl font-bold">
+                            ${appState.currentStep === t.questions.length - 1 ? '最終確認へ' : '次へ'}
+                        </button>
+                    </div>
+                </div>
+            `;
+            setTimeout(() => document.getElementById('q-input').focus(), 100);
+        }
+
+        function moveStep(dir) {
+            const t = appState.templates[appState.currentTemplate];
+            if (appState.currentStep + dir >= 0 && appState.currentStep + dir < t.questions.length) {
+                appState.currentStep += dir;
+                renderQuestion();
+            } else if (appState.currentStep + dir === t.questions.length) {
+                switchView('preview');
+            }
+        }
+
+        // Logic for Page Splitting
+        function renderDocument() {
+            const t = appState.templates[appState.currentTemplate];
+            const res = appState.responses;
+            const captureArea = document.getElementById('capture-area');
+            const ghost = document.getElementById('ghost-render');
+            captureArea.innerHTML = "";
+            
+            const maxPageHeight = 842 - (25 * 2.83 * 2); // A4 height in px at 72dpi, adjusted for padding
+            let currentPageContent = "";
+            let pages = [];
+
+            // Content building blocks
+            const blocks = [];
+            blocks.push(`<div style="text-align: right; margin-bottom: 20px; font-size: 9pt;">${new Date().toLocaleDateString('ja-JP', {year:'numeric', month:'long', day:'numeric'})}</div>`);
+            blocks.push(`<h1 style="font-size: 24pt; font-weight: 800; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 40px;">${res.title || '無題のドキュメント'}</h1>`);
+            
+            t.questions.filter(q => q.id !== 'title').forEach(q => {
+                blocks.push(`<div style="margin-bottom: 30px;">
+                    <h3 style="font-size: 12pt; font-weight: 800; border-left: 4px solid #000; padding-left: 15px; margin-bottom: 10px;">${q.label}</h3>
+                    <p style="white-space: pre-wrap; padding-left: 19px; line-height: 1.8; color: #333;">${res[q.id] || '-'}</p>
+                </div>`);
+            });
+            blocks.push(`<div style="margin-top: 60px; text-align: right; font-size: 10pt;">以上</div>`);
+
+            // Virtual paging
+            let currentTempHtml = "";
+            blocks.forEach((block, index) => {
+                ghost.innerHTML = currentTempHtml + block;
+                // Measure height in pixel-equivalent (roughly)
+                if (ghost.offsetHeight > 750 && currentTempHtml !== "") {
+                    pages.push(currentTempHtml);
+                    currentTempHtml = block;
+                } else {
+                    currentTempHtml += block;
+                }
+                if (index === blocks.length - 1) pages.push(currentTempHtml);
+            });
+
+            pages.forEach((pageHtml, i) => {
+                const pageDiv = document.createElement('div');
+                pageDiv.className = "a4-page";
+                pageDiv.id = `page-${i}`;
+                pageDiv.innerHTML = pageHtml;
+                // Add page number
+                const pageNum = document.createElement('div');
+                pageNum.style = "position: absolute; bottom: 15mm; left: 0; right: 0; text-align: center; font-size: 8pt; color: #999;";
+                pageNum.innerText = `${i + 1} / ${pages.length}`;
+                pageDiv.appendChild(pageNum);
+                captureArea.appendChild(pageDiv);
+            });
+        }
+
+        async function generatePDF() {
+            const loader = document.getElementById('loader');
+            loader.classList.remove('hidden');
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            
+            const pages = document.querySelectorAll('.a4-page');
+            for (let i = 0; i < pages.length; i++) {
+                const canvas = await html2canvas(pages[i], { scale: 3, useCORS: true });
+                const imgData = canvas.toDataURL('image/png');
+                if (i > 0) pdf.addPage();
+                pdf.addImage(imgData, 'PNG', 0, 0, 210, 297);
+            }
+            
+            pdf.save(`${appState.templates[appState.currentTemplate].name}.pdf`);
+            loader.classList.add('hidden');
+        }
+
+        window.onload = async () => {
+            const user = await checkAuth();
+            if (user) {
+                currentUser = user;
+                document.getElementById('guest-guard').classList.add('hidden');
+                document.getElementById('main-header').classList.remove('hidden');
+                document.getElementById('app-container').classList.remove('hidden');
+                document.getElementById('user-name').innerText = user.userId;
+                document.getElementById('user-avatar').src = user.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${user.email}`;
+                initTemplates();
+            }
+        };
+    </script>
+</body>
+</html>
